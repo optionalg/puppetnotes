@@ -1,0 +1,234 @@
+###Puppet Newbie Notes v2.0
+
+***SOURCES***
+
+http://puppetlabs.com/presentations/getting-started-puppet
+http://docs.puppetlabs.com/guides/installation.html
+http://docs.puppetlabs.com/guides/puppetlabs_package_repositories.html#for-red-hat-enterprise-linux-and-derivatives
+http://docs.puppetlabs.com/guides/installation.html#post-install
+http://docs.puppetlabs.com/references/latest/configuration.html#ssldir
+http://docs.puppetlabs.com/learning/manifests.html
+http://docs.puppetlabs.com/learning/agent_master_basic.html
+
+***STEPS***
+1) Made a three-tier VPC (just because...we'll only really use the DMZ portion probably)
+2) Watched the "getting started with puppet" video at http://puppetlabs.com/presentations/getting-started-puppet for a refresher.
+	Three minutes in, and a quick skim of the transcript told me this would not tell me how to set up a puppet master.  I'm sure this is great stuff, but it's not what I want.
+3) Little more searching and I came to the "Installing Puppet" docs at http://docs.puppetlabs.com/guides/installation.html.
+	Looks promising...let's try to follow this.
+	I'm using Amazon Linux (which is a RHEL-derivative), and I'm going to aim for an Agent/Master configuration.
+	From the pre-install>Network section:
+		In an agent/master deployment, you must prepare your network for Puppet’s traffic.
+
+    	Firewalls: The puppet master server must allow incoming connections on port 8140, and agent nodes must be able to connect to the master on that port.
+    		- Easy enough
+    		- #turns out that puppet does http over port 8140.  This is one of the major things I learned here.  To me, it was not clear until I asked someone.
+
+
+    	Name resolution: Every node must have a unique hostname. Forward and reverse DNS must both be configured correctly. Instructions for configuring DNS are beyond the scope of this guide. If your site lacks DNS, you must write an /etc/hosts file on each node.
+    		- Fine...I'll go with host files.  We will have to remember to configure this later.
+
+    	Note: The default master hostname is puppet. Your agent nodes will be ready sooner if this hostname resolves to your puppet master.
+    		- ok.  We'll do this in the host file.
+
+5) Create SG on VPC for Puppet Master
+	Zachs_Puppet_Master_SG
+	ALLOW INCOMING
+		port 8140 from (puppet client group we will create next)
+		port 22 from ALL (would normally restrict this to IP of places I want to manage from, but for demonstration...)
+	ALLOW OUTGOING
+		ALL to ALL
+
+6) Create SG on VPC for Puppet Clients (technically, I should have called this "Agents" for proper terminology)
+	Zachs_Puppet_Client_SG
+	ALLOW INCOMING
+		port 22 from ALL (would normally restrict this to IP of places I want to manage from, but for demonstration...)
+	ALLOW OUTGOING
+		ALL to ALL
+
+7) Launch instance into Zachs_Puppet_Master_SG
+	m1.large
+	120GB
+	Name "Zachs_Puppet_Master"
+	 
+
+8) Attach EIP to Zachs_Puppet_Master
+	x.x.x.x
+
+9) Not sure what amazon's puppet repo looks like, but I want to use the latest, shiniest versions of Puppet, so I'm going to install the puppet repo using instructions at http://docs.puppetlabs.com/guides/puppetlabs_package_repositories.html#for-red-hat-enterprise-linux-and-derivatives
+
+10) from the "x86-64" section for RHEL 6
+	sudo rpm -ivh https://yum.puppetlabs.com/el/6/products/x86_64/puppetlabs-release-6-7.noarch.rpm
+
+11) Install Puppet Master (YAAAY)
+	sudo yum install puppet-server
+
+	From the install notes: "This will install Puppet and an init script (/etc/init.d/puppetmaster) for running a test-quality puppet master server." What does this even mean?  Test-quality?  What do I do to run a "real" Puppet server then?
+
+	It turns out that what's going on here is that Puppet actually uses HTTP to do its thing.  It installs with a pretty basic web server (not apache/NGINX/other darlings of the internet community at present) and so, to do things at scale, you need to replace the web server with something more performant.  We won't do this here, as we're just trying to get to the basic process of installing Puppet Master/Agent.
+
+***At this point, the instructions jump to "put some other stuff on your client nodes" which...ok...great...I intend to do that eventually, but I *really* want to be learning about this master thing, and I feel like we're not done yet, so I'm going to plow on with the "configure and enable" part, which continues at http://docs.puppetlabs.com/guides/installation.html#post-install 
+
+12) At this point, I got a bit frustrated with the way the documentation keeps jumping between Master and Agent.  Ex:
+
+"Oh boy...look...I get that this all is kind of inter-dependent, but is it too much to ask to have the ability to follow separate documentation for setting up masters and clients?"
+
+I decided to continue with the master setup
+
+13) ok...edit /etc/puppet/puppet.conf
+	sudo vim /etc/puppet/puppet.conf
+	##NOTE  This path is for open-source puppet.  Enterprise puppet uses a slightly different path, which is referenced in all the materials
+
+	Again, I found the documentation to be a bit vague.  From my first-draft notes:
+	"The documentation says one should set dns_alt_names, then says they default to the puppet master’s certname and puppet.  When I go to edit the file, there's no section for this.  Will it default that way if I don't add it?  Who knows?  I guess we'll find out.  For now, I'll leave the puppet.conf file alone and come back to it if it's screwy."
+
+	It turns out that, for the purposes of just getting a server set up, this is fine.  No editing is actually necessary.
+
+14) **the documentation starts to get a little foggy here for my liking**
+	#We're going to start..and enable puppet master here..
+	sudo puppet resource service puppetmaster ensure=running enable=true
+	#(is this actually mangling a puppet manifest under the hood?  Maybe?  Maybe not?)
+	**reply**
+	dnsdomainname: Unknown host
+	notice: /Service[puppetmaster]/ensure: ensure changed 'stopped' to 'running'
+	service { 'puppetmaster':
+  	ensure => 'running',
+  	enable => 'true',
+	}
+	**end reply**
+	#Sure does look like it set this ensure=running bit in a manifest...would *love* some explanation in the documentation
+
+	**The documentation again meanders into cron jobs, if you're using a standalone, etc....Again, personal preference, I would have liked to see separate streams for this documentation.
+
+15) Launch instance into Zachs_Puppet_Client_SG
+	t1.micro
+	120GB
+	Name "Zachs_Puppet_Agent"
+	
+
+16) Attach EIP to Agent
+	x.x.x.x
+
+17) Change hostname on puppet master (we're going to just call it "puppet")
+	sudo vim /etc/sysconfig/network
+	#HOSTNAME=puppet.localdomain
+	reboot
+
+
+18) Change hostname on puppet agent (we'te going to call it "agent1")
+	sudo vim /etc/sysconfig/network
+	#HOSTNAME=agent1.localdomain
+	reboot
+
+19) edit /etc/hosts on Master to include itself and agent1
+	sudo vim /etc/hosts
+	127.0.0.1   localhost localhost.localdomain
+	127.0.0.1   puppet    puppet.localdomain
+	10.0.0.225  agent1    agent1.localdomain
+
+20) edit /etc/hosts on Agent1 to include itself and puppet
+	sudo vim /etc/hosts
+	127.0.0.1   localhost localhost.localdomain
+	127.0.0.1   agent1    agent1.localdomain
+	10.0.0.112  puppet    puppet.localdomain	
+
+21) check that master can ping agent1
+	#from master
+	ping agent1
+	#in this case, we can't actually ping due to port restrictions, but it does resolve the right ip, which is what we want
+
+22) check that agent1 can ping puppet
+	#from agent
+	ping puppet
+	#in this case, we can't actually ping due to port restrictions, but it does resolve the right ip, which is what we want
+
+23) Add puppet repo to Agent1
+	sudo rpm -ivh https://yum.puppetlabs.com/el/6/products/x86_64/puppetlabs-release-6-7.noarch.rpm
+
+
+24) Install puppet on Agent1
+	sudo yum install puppet
+
+25) Start Puppet Agent on agent1, with the waitforcert flag enabled (since we will need to sign the cert)
+	puppet agent --waitforcert 60 --test
+
+	**reply
+	info: Creating a new SSL key for agent1.localdomain
+	info: Caching certificate for ca
+	info: Creating a new SSL certificate request for agent1.localdomain
+	info: Certificate Request fingerprint (md5): 6E:EB:D1:6D:E7:68:A4:55:BF:68:B5:D7:67:92:67:E6
+
+	#if you don't sign the cert on master within 60 seconds, you will see a message like "did not receive cert"  
+	#Don't worry about this.  Agent will keep checking in until cert is signed
+
+26) On Master, list the certs waiting to be signed
+	sudo puppet cert --list
+
+	**reply
+	"agent1.localdomain" (6E:EB:D1:6D:E7:68:A4:55:BF:68:B5:D7:67:92:67:E6)
+
+
+27) On Master, sign the cert for Agent1
+	sudo puppet cert --sign agent1.localdomain
+
+	**reply
+	notice: Signed certificate request for agent1.localdomain
+	notice: Removing file Puppet::SSL::CertificateRequest agent1.localdomain at '/var/lib/puppet/ssl/ca/requests/agent1.localdomain.pem'
+
+	#On Agent, you will see something like:
+	info: Caching certificate for agent1.localdomain
+	info: Caching certificate_revocation_list for ca
+	info: Caching catalog for agent1.localdomain
+	info: Applying configuration version '1395086357'
+	info: Creating state file /home/ec2-user/.puppet/var/state/state.yaml
+	notice: Finished catalog run in 0.02 seconds
+	
+#At this point, your master is running and your agent is hooked to it.  
+
+28) Run one more puppet run on the agent, just to make sure it's working
+	puppet agent -t 
+	#this just makes the puppet agent do a test run.  The --waitforcert bit is no longer needed because we have already signed the cert.
+	#we should see a response like:
+	info: Caching catalog for agent1.localdomain
+	info: Applying configuration version '1395088136'
+	notice: Finished catalog run in 0.02 seconds
+
+#Awesome.  Agent and Master are doing their thing.  However, I want to make something a little more tangible happen.  I am going to make the Master push a test file to the Agent.
+
+#we're going to make a node definition on the master...referencing http://docs.puppetlabs.com/learning/agent_master_basic.html
+#on master
+sudo su -
+cd /etc/puppet/manifests
+#this is where non-enterprise puppet keeps its manifests
+#we do not currently have a site.pp here, so we're going to make one
+vim site.pp
+#we are going to include something very similar to the start of the "node definition" section here.  We will match our agent node.  However, instead of #including ntp, we're just going to include a test resource file like in docs.puppetlabs.com/learning/manifests.html
+
+node 'agent1.localdomain' {
+      file {'testfile':
+      path    => '/tmp/testfile',
+      ensure  => present,
+      mode    => 0640,
+      content => "I'm a test file.",
+      }
+
+    }
+
+#we save this as site.pp
+
+#now, on the agent, we run 
+puppet agent -t
+#we will see
+info: Caching catalog for agent1.localdomain
+info: Applying configuration version '1395071609'
+notice: /Stage[main]//Node[agent1.localdomain]/File[testfile]/ensure: created
+notice: Finished catalog run in 0.04 seconds
+#this means the manifest pushed to this node
+#we can make sure it worked by doing
+cat /tmp/testfile
+#on the agent node
+#we should see
+I'm a test file.
+
+#YAAAAAY!!!  WE MADE SOMETHING HAPPEN IN PUPPET!  NOW TO GO OUT AND FIGURE OUT HOW TO TAKE OVER THE WORLD!
+
